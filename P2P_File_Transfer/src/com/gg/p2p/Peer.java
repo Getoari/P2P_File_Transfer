@@ -355,7 +355,7 @@ public class Peer extends JFrame {
 
 							File fileToSend = new File(DOWNLOAD_PATH + response[3]);
 							Socket fileSocket = new Socket(response[1], Integer.valueOf(response[2]));
-							int length = Integer.valueOf(response[4]);
+							int length = (int) fileToSend.length();
 							
 							System.out.println(length);
 							byte[] mybytearray = new byte[length];
