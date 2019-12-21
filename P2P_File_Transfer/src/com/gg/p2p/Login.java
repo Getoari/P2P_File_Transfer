@@ -17,9 +17,12 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.Base64;
+import java.util.Properties;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 
 public class Login {
 
@@ -31,6 +34,7 @@ public class Login {
  	static PreparedStatement pst = null;
 	private static int userId;
 	private static String salt;
+	private static JButton btnLogin;
 	
 
 	/**
@@ -54,9 +58,30 @@ public class Login {
 	 * Create the application.
 	 */
 	public Login() {
-		
-		conn = SqlDbConnector.connectToDb(Peer.SERVER_ADDRESS, "user", "fiek!@#");
 		initialize();
+		
+		Properties properties = new Properties();
+
+		try {
+			properties.load(Login.class.getResourceAsStream("peer.properties"));
+			
+			btnLogin.setEnabled(true);
+			
+			conn = SqlDbConnector.connectToDb(
+					properties.getProperty("DB_HOST"),
+					properties.getProperty("DB_PORT"),
+					properties.getProperty("DB_NAME"), 
+					properties.getProperty("DB_USERNAME"), 
+					properties.getProperty("DB_PASSWORD")
+			);
+			
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		
+		
 	}
 
 	/**
@@ -69,7 +94,8 @@ public class Login {
 		frmLoginPp.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		frmLoginPp.getContentPane().setLayout(null);
 		
-		JButton btnLogin = new JButton("Login");
+		btnLogin = new JButton("Login");
+		btnLogin.setEnabled(false);
 		btnLogin.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
 				
@@ -78,9 +104,10 @@ public class Login {
 				
 				
 				try {
-					String query = "SELECT id,salt FROM users WHERE name='" + txtUsername.getText() + "'";
+					String query = "SELECT `id`, `salt` FROM `users` WHERE `name` = ?";
 					
 					pst = conn.prepareStatement(query);
+					pst.setString(1, txtUsername.getText());
 					res = pst.executeQuery();
 					
 					while(res.next()){
@@ -88,22 +115,22 @@ public class Login {
 						salt = res.getString("salt");
 			        }
 					pst.close();
-				
-					System.out.println(query + salt);
 					
-					String query2 ="SELECT * FROM users WHERE id='"+ userId + "' AND password='"+ SaltedMD5.getSecurePassword(String.valueOf(txtPassword.getPassword()), Base64.getDecoder().decode(salt)) +"'";
+					String query2 ="SELECT * FROM `users` WHERE `id` = ? AND `password` = ?";
+					
 					pst = conn.prepareStatement(query2);
+					
+					pst.setString(1, String.valueOf(userId));
+					pst.setString(2, SaltedMD5.getSecurePassword(String.valueOf(txtPassword.getPassword()), Base64.getDecoder().decode(salt)));
 					res = pst.executeQuery();
 					
-					System.out.println(query2);
-					
-					res.last();
+					res.next();
 					int count = res.getRow();
 					pst.close();
 					
 					if ( count > 0 ) {
 						frmLoginPp.dispose();
-						Peer objPeer = new Peer(userId);
+						Peer objPeer = new Peer(userId, conn);
 						objPeer.setVisible(true);
 					} else {
 						JOptionPane.showMessageDialog(null, "Incorrect Crediencials!");
@@ -112,7 +139,6 @@ public class Login {
 					JOptionPane.showMessageDialog(null, "Incorrect Crediencials!");
 					e1.printStackTrace();
 				} catch (Exception e2) {
-					// TODO: handle exception
 					JOptionPane.showMessageDialog(null, e2);
 				}
 			}

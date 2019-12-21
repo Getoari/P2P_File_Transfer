@@ -1,7 +1,5 @@
 package com.gg.p2p;
 
-import java.awt.EventQueue;
-
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.border.EmptyBorder;
@@ -42,28 +40,13 @@ public class Accounts extends JFrame {
  	private JPasswordField txtPassword;
 
 	/**
-	 * Launch the application.
-	 */
-	public static void main(String[] args) {
-		EventQueue.invokeLater(new Runnable() {
-			public void run() {
-				try {
-					Accounts frame = new Accounts();
-					frame.setVisible(true);
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
-			}
-		});
-		
-		
-	}
-
-	/**
 	 * Create the frame.
 	 */
-	public Accounts() {
-		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+	public Accounts(Connection conn) {
+			
+		Accounts.conn = conn;
+		
+		setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
 		setBounds(100, 100, 673, 385);
 		contentPane = new JPanel();
 		contentPane.setBorder(new EmptyBorder(5, 5, 5, 5));
@@ -108,10 +91,14 @@ public class Accounts extends JFrame {
 					String salt = SaltedMD5.generateSalt();
 					
 					String query = "INSERT INTO `users` (`name`, `password`, `salt`) "
-			    			+ "VALUES ('" + txtUsername.getText() + "', '" + SaltedMD5.getSecurePassword(String.valueOf(txtPassword.getPassword()), Base64.getDecoder().decode(salt)) + "', '" + salt + "')";
+			    			+ "VALUES ( ?, ?, ?)";
 					
 					try {
+						
 			    		pst = conn.prepareStatement(query);
+			    		pst.setString(1, txtUsername.getText());
+			    		pst.setString(2, SaltedMD5.getSecurePassword(String.valueOf(txtPassword.getPassword()), Base64.getDecoder().decode(salt)));
+			    		pst.setString(3, salt);
 			    		pst.execute();
 					} catch (SQLException e1) {
 						e1.printStackTrace();
@@ -142,14 +129,12 @@ public class Accounts extends JFrame {
 		btnDelete.setBounds(546, 315, 89, 23);
 		contentPane.add(btnDelete);
 
-
-		conn = SqlDbConnector.connectToDb("localhost", "admin", "toor");
 		updateTable();
 	}
 	
 	private static void updateTable() {
 		try {
-			String sql = "select id as ID,  name as Username from users";
+			String sql = "SELECT `id` AS ID,  `name` AS Username, `ip` AS Host FROM `users`";
 			
 			pst = conn.prepareStatement(sql);
 			res = pst.executeQuery();

@@ -3,6 +3,7 @@ package com.gg.p2p;
 import java.awt.EventQueue;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -11,6 +12,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
+import java.util.Properties;
 
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -123,10 +125,14 @@ public class Server implements Runnable {
 		frmServer.getContentPane().add(lblServerStatus);
 		
 		JButton btnAccounts = new JButton("Accounts");
-		btnAccounts.addActionListener(new ActionListener() {
+		btnAccounts.addActionListener(new ActionListener() {	
 			public void actionPerformed(ActionEvent arg0) {
-				Accounts objAccounts = new Accounts();
-				objAccounts.setVisible(true);
+				if(serverOnline) {
+					Accounts objAccounts = new Accounts(conn);
+					objAccounts.setVisible(true);
+				} else {
+					JOptionPane.showMessageDialog(null, "Please connect to server!");
+				}
 			}
 		});
 		btnAccounts.setBounds(552, 25, 89, 23);
@@ -171,7 +177,7 @@ public class Server implements Runnable {
 	
 	public static void updateTable() {
 		try {
-			String sql = "select ROW_NUMBER() OVER (ORDER BY id ASC) AS No, name as Name, size as Size, type as Type, modified as Modified from files";
+			String sql = "select ROW_NUMBER() OVER (ORDER BY added DESC) AS No, name as Name, pretty_size(size) as Size, type as Type, DATE_FORMAT(added, '%d/%c/%Y  %H:%i') as Added from files";
 			
 			pst = conn.prepareStatement(sql);
 			res = pst.executeQuery();
@@ -179,15 +185,32 @@ public class Server implements Runnable {
 			tblFiles.setModel(DbUtils.resultSetToTableModel(res));
 			pst.close();
 		} catch (Exception e) {
-			
+			e.printStackTrace();
 		}
 	}
 	
 	public synchronized static void connect(){
 		try {
 			if(!serverOnline) {	
-				
-				conn = SqlDbConnector.connectToDb("localhost", "admin", "toor");
+
+				Properties properties = new Properties();
+
+				try {
+					properties.load(Server.class.getResourceAsStream("server.properties"));
+										
+					conn = SqlDbConnector.connectToDb(
+							properties.getProperty("DB_HOST"),
+							properties.getProperty("DB_PORT"),
+							properties.getProperty("DB_NAME"), 
+							properties.getProperty("DB_USERNAME"), 
+							properties.getProperty("DB_PASSWORD")
+					);
+					
+				} catch (FileNotFoundException e) {
+					e.printStackTrace();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
 				
 				serverStarter = new Thread(new Runnable() {
 					
@@ -237,7 +260,6 @@ public class Server implements Runnable {
 		}
 		
 	}
-		
 	
 	private int findPeer(int id) {
 		for (int i = 0; i < clientCount; i++)
@@ -289,16 +311,18 @@ public class Server implements Runnable {
 	            peers[i].send(str);
             }		
 	    } else if (getParameterFromString(str, 0).equals("upload")) {
-	    	
-	    	String query = "";
-	    	
-	    	query = "INSERT INTO `files` (`uid`, `name`, `size`, `type`, `modified`) "
-			 			+ "VALUES ('" + getParameterFromString(str, 2) + "', '" + getParameterFromString(str, 1) + "', '" 
-			 			+ getParameterFromString(str, 3) + "', '" + getParameterFromString(str, 4) + "', '" + LocalDateTime.now() + "')";
+	    		    	
+	    	 String query = "INSERT INTO `files` (`uid`, `name`, `size`, `type`, `added`) "
+			 			+ "VALUES (?, ?, ?, ?, ?)";
 	    	
 	    	try {
 	    		pst = conn.prepareStatement(query);
-	    		pst.execute();
+	    		pst.setString(1, getParameterFromString(str, 1));
+	    		pst.setString(2, getParameterFromString(str, 2));
+	    		pst.setString(3, getParameterFromString(str, 3));
+	    		pst.setString(4, getParameterFromString(str, 4));
+	    		pst.setString(5, String.valueOf(LocalDateTime.now()));
+	    		pst.executeUpdate(); 
 			} catch (SQLException e1) {
 				e1.printStackTrace();
 			} finally {
@@ -307,12 +331,15 @@ public class Server implements Runnable {
 			}
 	    } else if (getParameterFromString(str, 0).equals("request")) {
 	    	
-	    	String query = "SELECT ip,port FROM users WHERE id='" + getParameterFromString(str, 4) +"'";
+	    	String query = "SELECT `ip`, `port` FROM `users` "
+	    			+ "WHERE `id` = ?";
+	    	
 	    	int port = 0;
 //	    	String ip = "";
 	    	
 	    	try {
 				pst = conn.prepareStatement(query);
+				pst.setString(1, getParameterFromString(str, 4));
 				res = pst.executeQuery();
 				
 				while(res.next()) {
@@ -335,12 +362,15 @@ public class Server implements Runnable {
 	    	
 	    } else if (getParameterFromString(str, 0).equals("assign")) {
 	    	
-			String query = "UPDATE `users` SET `ip` = '" + getParameterFromString(str, 1) + "', `port` = '" + getParameterFromString(str, 2) 
-			+ "' WHERE (`id` = '" + getParameterFromString(str, 3) + "');";	
-	    	
+	    	String query = "UPDATE `users` SET `ip` = ?, `port` = ? "
+	    	 		+ "WHERE (`id` = ?);";
+	    	 	    	
 	    	try {
 	    		pst = conn.prepareStatement(query);
-	    		pst.execute();
+	    		pst.setString(1, getParameterFromString(str, 1));
+	    		pst.setString(2, getParameterFromString(str, 2));
+	    		pst.setString(3, getParameterFromString(str, 3));
+	    		pst.executeUpdate();
 			} catch (SQLException e1) {
 				e1.printStackTrace();
 			} 

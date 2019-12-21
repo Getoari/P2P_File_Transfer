@@ -33,6 +33,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Properties;
 
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -62,20 +63,20 @@ public class Peer extends JFrame {
  	static Connection conn = null;
  	static ResultSet res = null;
  	static PreparedStatement pst = null;
-    public static final String SERVER_ADDRESS = "192.168.1.90";
     private static final int SERVER_PORT = 8888;
 	protected static final String DOWNLOAD_PATH = "C:\\Downloads\\"; 
     private static JTable tblFiles;
     private static File file = null;
     private static int userId;
     private static String fileName;
+    private static int fileId;
 
 
 	/**
 	 * Create the frame.
 	 * @param userId 
 	 */
-	public Peer(int userId) {
+	public Peer(int userId, Connection conn) {
 		setTitle("Peer");
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		setBounds(100, 100, 800, 551);
@@ -85,6 +86,7 @@ public class Peer extends JFrame {
 		contentPane.setLayout(null);
 		
 		Peer.userId = userId;
+		Peer.conn = conn;
 		
 		JPanel panel = new JPanel();
 		FlowLayout flowLayout = (FlowLayout) panel.getLayout();
@@ -105,12 +107,8 @@ public class Peer extends JFrame {
 			public void actionPerformed(ActionEvent arg0) {
 				JFileChooser fc = new JFileChooser();
 				
-//				FileNameExtensionFilter filter = new FileNameExtensionFilter("TEXT FILES", "txt", "text");
-//				fc.setFileFilter(filter);
-				
 				fc.setCurrentDirectory(new java.io.File("user.home"));
                 fc.setDialogTitle("Choose the file...");
-                fc.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
                 
                 if (fc.showOpenDialog(btnChooseFile) == JFileChooser.APPROVE_OPTION) {
                 	file = fc.getSelectedFile();
@@ -141,12 +139,17 @@ public class Peer extends JFrame {
 				        while ((length = is.read(buffer)) > 0) {
 				            os.write(buffer, 0, length);
 				        }
-				        				
-						JOptionPane.showMessageDialog(null, "File successfuly added!");	
 				        
-				        out.writeUTF("upload:" + fileName + ":" + userId + ":" + file.length() + ":" + fileType[0]);
+				        // Make the file read only
+				        File savedFile = new File(DOWNLOAD_PATH + fileName);
+				        savedFile.setReadOnly();
+				        
+				        out.writeUTF("upload:" + userId + ":" + fileName + ":" + file.length() + ":" + fileType[0]);
 				        is.close();
 				        os.close();	
+				        
+				        file = null;
+				        txtFilePath.setText("");
 				        
 					} catch (IOException e) {
 						JOptionPane.showMessageDialog(null, "Falied to add the file!");
@@ -189,16 +192,19 @@ public class Peer extends JFrame {
 							desktopOpen(file);
 						else {						
 							// File Receiver Thread
-							Thread t1 = new Thread(new Runnable() {
+							Thread fileReceiverThread = new Thread(new Runnable() {
 								
 								@Override
 								public void run() {
 									
 									int uid = 0;
 									
-									String query = "SELECT uid,size FROM files where name='" + fileName +"'";
+									String query = "SELECT `uid`, `size` FROM `files` WHERE `name` = ?";
+									
 									try {
 										pst = conn.prepareStatement(query);
+										pst.setString(1, fileName);
+										
 										res = pst.executeQuery();
 										
 										while(res.next()){
@@ -216,8 +222,8 @@ public class Peer extends JFrame {
 										
 										// File request sender
 										try {
-											out.writeUTF("request" + ":" + socket.getLocalAddress().getHostAddress() + ":" + fileServerSocket.getLocalPort() + ":" + fileName + ":" + uid);
-											System.out.println("request" + ":" + socket.getLocalAddress().getHostAddress() + ":" + fileServerSocket.getLocalPort() + ":" + fileName + ":" + uid);
+											out.writeUTF("request" + ":" + socket.getLocalAddress().getHostAddress() + ":" + fileServerSocket.getLocalPort() + ":" + fileId + ":" + uid);
+											System.out.println("request" + ":" + socket.getLocalAddress().getHostAddress() + ":" + fileServerSocket.getLocalPort() + ":" + fileId + ":" + uid);
 										} catch (IOException e) {
 											e.printStackTrace();
 										}
@@ -237,13 +243,16 @@ public class Peer extends JFrame {
 									    bos.close();
 									    fileSocket.close();
 									    fileServerSocket.close();
+									    
+									    File receivedFile = new File(DOWNLOAD_PATH + fileName);
+									    receivedFile.setReadOnly();
 									} catch (IOException e1) {
 										e1.printStackTrace();
 									}	
 								}
 							});
 							
-							t1.start();		    
+							fileReceiverThread.start();		    
 						}
 					}  
 					catch(Exception e)  {  
@@ -269,8 +278,8 @@ public class Peer extends JFrame {
 			@Override
 			public void mouseClicked(MouseEvent arg0) {
 				DefaultTableModel model = (DefaultTableModel)tblFiles.getModel();
-//				int id = (int)model.getValueAt(tblFiles.getSelectedRow(), 0);
-				fileName = (String)model.getValueAt(tblFiles.getSelectedRow(), 1);
+				fileId = (int) model.getValueAt(tblFiles.getSelectedRow(), 0);
+				fileName = (String) model.getValueAt(tblFiles.getSelectedRow(), 2);
 				
 				file = new File(DOWNLOAD_PATH + fileName); 
 				
@@ -309,12 +318,16 @@ public class Peer extends JFrame {
 	}
 
 	private static void initialize() {
-		conn = SqlDbConnector.connectToDb(SERVER_ADDRESS, "user", "fiek!@#");
 		
 		updateTable();
 		
 		try { 
-            socket = new Socket(SERVER_ADDRESS, SERVER_PORT);  
+			
+			Properties properties = new Properties();
+
+			properties.load(Peer.class.getResourceAsStream("peer.properties"));
+			
+            socket = new Socket(properties.getProperty("DB_HOST"), SERVER_PORT);  
             lblPeer.setText(lblPeer.getText() + " - " + socket.getLocalSocketAddress());
             System.out.println("Connected"); 
             
@@ -331,7 +344,7 @@ public class Peer extends JFrame {
         } 
 		
 		// Message Receiver Thread
-		Thread t1 = new Thread(new Runnable() {
+		Thread messageReceiverThread = new Thread(new Runnable() {
 			
 			@Override
 			public void run() {
@@ -352,20 +365,47 @@ public class Peer extends JFrame {
 						if(response[0].equals("update")) {
 							updateTable();
 						} else if (response[0].equals("send")) {
-
-							File fileToSend = new File(DOWNLOAD_PATH + response[3]);
-							Socket fileSocket = new Socket(response[1], Integer.valueOf(response[2]));
-							int length = (int) fileToSend.length();
 							
-							System.out.println(length);
-							byte[] mybytearray = new byte[length];
-						    BufferedInputStream bis = new BufferedInputStream(new FileInputStream(fileToSend));
-						    bis.read(mybytearray, 0, mybytearray.length);
-						    OutputStream os = fileSocket.getOutputStream();
-						    os.write(mybytearray, 0, mybytearray.length);
-						    os.flush();
-						    fileSocket.close();
-						    bis.close();
+							Thread fileSenderThread = new Thread(new Runnable() {
+
+								@Override
+								public void run() {
+									String query = "SELECT `name` FROM `files` WHERE `id` = ?";
+									String fileToSave = "";
+									
+									try {
+										pst = conn.prepareStatement(query);
+										
+										pst.setString(1, response[3]);
+										res = pst.executeQuery();
+										
+										if(res.next()){
+											fileToSave = res.getString(1);
+										}		
+										
+										File fileToSend = new File(DOWNLOAD_PATH + fileToSave);
+										Socket fileSocket = new Socket(response[1], Integer.valueOf(response[2]));
+										int length = (int) fileToSend.length();
+										
+										System.out.println(length);
+										byte[] mybytearray = new byte[length];
+									    BufferedInputStream bis = new BufferedInputStream(new FileInputStream(fileToSend));
+									    bis.read(mybytearray, 0, mybytearray.length);
+									    OutputStream os = fileSocket.getOutputStream();
+									    os.write(mybytearray, 0, mybytearray.length);
+									    os.flush();
+									    fileSocket.close();
+									    bis.close();
+									} catch (SQLException | NumberFormatException | IOException e) {
+
+										e.printStackTrace();
+									}
+								}
+								
+							});
+							
+							fileSenderThread.start();
+							
 						}
 						
 					} catch (IOException e) {
@@ -376,7 +416,8 @@ public class Peer extends JFrame {
 			}
 		});
 		
-		t1.start();
+		
+		messageReceiverThread.start();
 	}
 	
 	private void desktopOpen(File file) throws IOException {
@@ -394,12 +435,21 @@ public class Peer extends JFrame {
 	
 	public static void updateTable() {
 		try {
-			String sql = "select id as ID, name as Name, pretty_size(size) as Size, type as Type, DATE_FORMAT(modified, '%d/%c/%Y  %H:%i') as Modified from files";
+			String sql = "SELECT `id` AS ID, ROW_NUMBER() OVER (ORDER BY added ASC) AS No, `name` as Name,"
+					+ " pretty_size(`size`) as Size, `type` as Type, DATE_FORMAT(`added`, '%d/%c/%Y  %H:%i') as Added"
+					+ " FROM `files` ORDER BY `added` DESC";
 			
 			pst = conn.prepareStatement(sql);
 			res = pst.executeQuery();
 			
 			tblFiles.setModel(DbUtils.resultSetToTableModel(res));
+			tblFiles.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+			tblFiles.removeColumn(tblFiles.getColumnModel().getColumn(0)); 
+			tblFiles.getColumnModel().getColumn(0).setPreferredWidth(60);
+			tblFiles.getColumnModel().getColumn(1).setPreferredWidth(400);
+			tblFiles.getColumnModel().getColumn(2).setPreferredWidth(100);
+			tblFiles.getColumnModel().getColumn(3).setPreferredWidth(90);
+			tblFiles.getColumnModel().getColumn(4).setPreferredWidth(116);
 			pst.close();
 		} catch (Exception e) {
 			e.printStackTrace();
