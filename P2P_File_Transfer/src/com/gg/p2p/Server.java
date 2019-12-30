@@ -228,6 +228,11 @@ public class Server implements Runnable {
 					serverSocket = new ServerSocket(8888);
 				}
 				
+				String sql = "call reset();";
+									
+				java.sql.CallableStatement cal = conn.prepareCall(sql);
+				cal.executeQuery();
+				
 				lblServerStatus.setText("Connected");
 				
 				lblServerStatusImage.setIcon(new ImageIcon(Server.class.getResource("/com/gg/resources/online.png")));
@@ -238,6 +243,8 @@ public class Server implements Runnable {
 			
 		} catch (IOException e1) {
 			e1.printStackTrace();
+		} catch (SQLException e) {
+			e.printStackTrace();
 		}
 	}
 	
@@ -273,11 +280,26 @@ public class Server implements Runnable {
 	    if (pos >= 0) {
 	    	PeerHandler toTerminate = peers[pos];
 	        System.out.println("Removing peer thread " + id + " at " + pos);
+	        
 	        if (pos < clientCount-1)
 	        	for (int i = pos+1; i < clientCount; i++)
 	        		peers[i-1] = peers[i];
+	        
 	        clientCount--;
+	        
 	        updateOnlinePeers();
+	        
+	        String query = "UPDATE `users` SET `active` = '0' "
+	    	 		+ "WHERE (`port` = ?);";
+	    	 	    	
+    		try {
+    			pst = conn.prepareStatement(query);
+				pst.setString(1, String.valueOf(id));
+	    		pst.executeUpdate();
+			} catch (SQLException e) {
+				e.printStackTrace();
+			}
+	        
 	        try {  
 	        	toTerminate.close();
 	        	toTerminate.interrupt();
@@ -329,41 +351,51 @@ public class Server implements Runnable {
 				handle("update");
 				updateTable();
 			}
-	    } else if (getParameterFromString(str, 0).equals("request")) {
+	    } else if (getParameterFromString(str, 0).equals("request")) {  
 	    	
-	    	String query = "SELECT `ip`, `port` FROM `users` "
-	    			+ "WHERE `id` = ?";
-	    	
+	    	String query = "SELECT `users`.`port` FROM `users` "
+	    			+ "INNER JOIN `has_file` ON `users`.`id` = `has_file`.`uid` "
+	    			+ "WHERE `has_file`.`fid` = ? AND `has_file`.`uid` <> ? AND `has_file`.`busy` = '0' "
+	    			+ "ORDER BY RAND();";
+	    			
 	    	int port = 0;
-//	    	String ip = "";
 	    	
 	    	try {
 				pst = conn.prepareStatement(query);
-				pst.setString(1, getParameterFromString(str, 4));
+				pst.setString(1, getParameterFromString(str, 3));
+				pst.setString(2, getParameterFromString(str, 4));
 				res = pst.executeQuery();
 				
-				while(res.next()) {
-//					ip = res.getString("ip");
-					port = res.getInt("port");
+				if (!res.next()) {
+					do {
+						Thread.sleep(5000);
+						res = pst.executeQuery();
+					} while (!res.next());
 				}
-				
+
+				port = res.getInt("port");
+					
 				for (int i = 0; i < clientCount; i++) {
 					if(peers[i].getID() == port) 
-						peers[i].send("send" + ":" + getParameterFromString(str, 1) + ":" + getParameterFromString(str, 2) + ":" + getParameterFromString(str, 3) + 
-								":" + getParameterFromString(str, 4));
-					System.out.println("send" + ":" + getParameterFromString(str, 1) + ":" + getParameterFromString(str, 2) + ":" + getParameterFromString(str, 3) + 
-							":" + getParameterFromString(str, 4));
-				}
+						peers[i].send("send" + ":" 
+								+ getParameterFromString(str, 1) + ":" 
+								+ getParameterFromString(str, 2) + ":" 
+								+ getParameterFromString(str, 3) + ":" 
+								+ getParameterFromString(str, 4));
 				
-			} catch (SQLException e) {
+					System.out.println("send" + ":" + getParameterFromString(str, 1) + ":" + getParameterFromString(str, 2) + ":" + getParameterFromString(str, 3) + 
+							":" + getParameterFromString(str, 4));					
+				}				
+				
+			} catch (SQLException | InterruptedException e) {
 				e.printStackTrace();
 			}
 			
 	    	
 	    } else if (getParameterFromString(str, 0).equals("assign")) {
 	    	
-	    	String query = "UPDATE `users` SET `ip` = ?, `port` = ? "
-	    	 		+ "WHERE (`id` = ?);";
+	    	String query = "UPDATE `users` SET `ip` = ?, `port` = ?, active = '1'"
+	    	 		+ " WHERE (`id` = ?);";
 	    	 	    	
 	    	try {
 	    		pst = conn.prepareStatement(query);
@@ -373,8 +405,52 @@ public class Server implements Runnable {
 	    		pst.executeUpdate();
 			} catch (SQLException e1) {
 				e1.printStackTrace();
-			} 
-	    }		
+			} finally {
+				handle("update");
+			}
+	    } else if (getParameterFromString(str, 0).equals("confirm")) {
+	    	String query = "INSERT INTO `has_file` (`fid`, `uid`) "
+	    			+ "VALUES (?, ?)";
+	    	
+	    	try {
+	    		pst = conn.prepareStatement(query);
+	    		pst.setString(1, getParameterFromString(str, 1));
+	    		pst.setString(2, getParameterFromString(str, 2));
+	    		pst.executeUpdate(); 
+	    	} catch (SQLException e1) {
+	    		e1.printStackTrace();
+	    	} 
+	    	
+	    } else if (getParameterFromString(str, 0).equals("delete")) {
+	    	String query = "DELETE FROM `has_file` "
+	    			+ "WHERE (`fid` = ? AND `uid` = ?)";
+	    	
+	    	try {
+	    		pst = conn.prepareStatement(query);
+	    		pst.setString(1, getParameterFromString(str, 1));
+	    		pst.setString(2, getParameterFromString(str, 2));
+	    		pst.executeUpdate(); 
+	    	} catch (SQLException e1) {
+	    		e1.printStackTrace();
+	    	} finally {
+	    		handle("update");
+	    	}
+	    } else if (getParameterFromString(str, 0).equals("set_busy")) {
+	    	String query = "UPDATE `has_file` SET `has_file`.`busy` = ? "
+	    			+ "WHERE `fid` = ? AND `uid` = ?";
+			
+			try {
+				pst = conn.prepareStatement(query);
+								
+				pst.setString(1, getParameterFromString(str, 1));
+				pst.setString(2, getParameterFromString(str, 2));
+				pst.setString(3, getParameterFromString(str, 3));
+				
+				pst.executeUpdate();
+			} catch (SQLException e) {
+				e.printStackTrace();
+			}
+	    }
 		
 		txtPeerList.setCaretPosition(txtPeerList.getDocument().getLength());    
 	}
@@ -396,10 +472,10 @@ public class Server implements Runnable {
 	        	peers[clientCount].start();
 	            txtPeerList.append(socket.getInetAddress().getHostAddress() + ":" + socket.getPort() + "\n");
 	          
-	            clientCount++; 
+	            clientCount++;			
 	         } catch(IOException ioe) {  
 	        	 System.out.println("Error opening thread: " + ioe); 
-	         } 
+	         }
 	   } else {
 	         System.out.println("Client refused: maximum " + peers.length + " reached.");
 	   }

@@ -6,7 +6,6 @@ import java.awt.Image;
 
 import javax.swing.JFrame;
 import javax.swing.JTextField;
-
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JButton;
@@ -51,21 +50,11 @@ public class Login {
 				}
 			}
 		});
-	}
-	
-
-	/**
-	 * Create the application.
-	 */
-	public Login() {
-		initialize();
 		
 		Properties properties = new Properties();
 
 		try {
 			properties.load(Login.class.getResourceAsStream("peer.properties"));
-			
-			btnLogin.setEnabled(true);
 			
 			conn = SqlDbConnector.connectToDb(
 					properties.getProperty("DB_HOST"),
@@ -75,13 +64,33 @@ public class Login {
 					properties.getProperty("DB_PASSWORD")
 			);
 			
+			EventQueue.invokeLater(new Runnable() {
+				public void run() {
+					try {
+						btnLogin.setEnabled(true);
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+				}
+			});
 		} catch (FileNotFoundException e) {
 			e.printStackTrace();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+	}
+	
+
+	/**
+	 * Create the application.
+	 */
+	public Login() {
 		
-		
+//		SwingUtilities.invokeLater(new Runnable() {
+//			public void run() {
+	  			initialize();
+//			}
+//	    });	
 	}
 
 	/**
@@ -97,14 +106,11 @@ public class Login {
 		btnLogin = new JButton("Login");
 		btnLogin.setEnabled(false);
 		btnLogin.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent arg0) {
-				
-				txtUsername.setText("test");
-				txtPassword.setText("test");
-				
+			public void actionPerformed(ActionEvent arg0) {				
 				
 				try {
-					String query = "SELECT `id`, `salt` FROM `users` WHERE `name` = ?";
+					String query = "SELECT `id`, `salt` FROM `users`"
+							+ " WHERE `name` = ?";
 					
 					pst = conn.prepareStatement(query);
 					pst.setString(1, txtUsername.getText());
@@ -116,7 +122,8 @@ public class Login {
 			        }
 					pst.close();
 					
-					String query2 ="SELECT * FROM `users` WHERE `id` = ? AND `password` = ?";
+					String query2 ="SELECT * FROM `users`"
+							+ " WHERE `id` = ? AND `password` = ?";
 					
 					pst = conn.prepareStatement(query2);
 					
