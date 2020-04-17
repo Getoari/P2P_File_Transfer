@@ -1,11 +1,13 @@
 package com.gg.p2p;
 
 import java.awt.Desktop;
+import java.awt.Dimension;
 
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.border.EmptyBorder;
 import javax.swing.JTextField;
+import javax.swing.ProgressMonitor;
 import javax.swing.border.TitledBorder;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
@@ -75,10 +77,11 @@ public class Peer extends JFrame {
     private static int userId;
     private static String fileName;
     private static int fileId;
-
+    
     private static final int SERVER_PORT = 8888;
-	protected static final String DOWNLOAD_PATH = "C:\\Downloads\\"; 
     private static final long FILE_SIZE_CHECK_VALUE = (long) Math.pow(1, 6);
+	protected static final String DOWNLOAD_PATH = 
+			System.getProperty("user.home") + File.separator + "P2P Downloads" + File.separator;
 
 	/**
 	 * Create the frame.
@@ -105,9 +108,9 @@ public class Peer extends JFrame {
 		contentPane.add(panel);
 		
 		txtFilePath = new JTextField();
-		txtFilePath.setFont(new Font("Tahoma", Font.PLAIN, 17));
 		txtFilePath.setEditable(false);
-		txtFilePath.setColumns(40);
+		txtFilePath.setFont(new Font("Tahoma", Font.PLAIN, 17));
+		txtFilePath.setPreferredSize(new Dimension(560, 25));
 		panel.add(txtFilePath);
 		
 		JButton btnChooseFile = new JButton("Choose File");
@@ -131,37 +134,81 @@ public class Peer extends JFrame {
 			public void actionPerformed(ActionEvent arg0) {
 				if(file != null) {
 			        try {
+			        	
 			        	String fileName = file.getName();
 			        	String[] fileType = new MimetypesFileTypeMap().getContentType(file).split("/");
 			        	
 			        	File directory = new File(DOWNLOAD_PATH);
-			            if (! directory.exists()){
-			                directory.mkdir();
+			        	if (! directory.exists()){
+			                directory.mkdirs();
 			            }
 
-			            FileInputStream is = new FileInputStream(file);
-						FileOutputStream os = new FileOutputStream(DOWNLOAD_PATH + fileName);
+						ProgressMonitor pm = new ProgressMonitor(Peer.this,
+								fileName + " (" + readableFileSize(file.length()) + ")",
+                                "Starting...", 0, 100);
 						
-						byte[] buffer = new byte[1024];
-				        int length;
-				        while ((length = is.read(buffer)) > 0) {
-				            os.write(buffer, 0, length);
-				        }
+						SwingUtilities.invokeLater(new Runnable() {
+							public void run() {							            
+					            pm.setMillisToDecideToPopup(100);
+					            pm.setMillisToPopup(100);
+							}
+						});
+			            
+			            final File fileToSave = file;			            
+			        				            		        
+				        new SwingWorker<Object, Object>() {
+
+							@Override
+							protected Object doInBackground() throws Exception {
+								FileInputStream is;
+								
+								try {
+									is = new FileInputStream(fileToSave);
+									FileOutputStream os = new FileOutputStream(DOWNLOAD_PATH + fileName);
+									
+									byte[] buffer = new byte[1024];
+							        int length;
+									DecimalFormat df2 = new DecimalFormat("#.#");
+							        int cycle = 0;
+							        double progress;
+							        									
+									while ((length = is.read(buffer)) > 0) {
+										
+										os.write(buffer, 0, length);
+							        	
+							        	cycle++;
+							        	
+							        	progress = 100.0*cycle*1024 / fileToSave.length();
+							        	
+						                pm.setNote("Loading file: " + df2.format(progress) + " %");
+						                pm.setProgress((int) progress);
+									}
+									
+									// Make the file read only
+							        File savedFile = new File(DOWNLOAD_PATH + fileName);
+							        savedFile.setReadOnly();
+							        
+							        out.writeUTF("upload:" + userId + ":" + fileName + ":" + fileToSave.length() + ":" + fileType[0]);
+							        is.close();
+							        os.close();
+							        
+							        SwingUtilities.invokeLater(new Runnable() {
+										public void run() {							            
+								            pm.close();
+									        txtFilePath.setText("");
+										}
+									});
+							        
+								} catch (IOException e) {
+									e.printStackTrace();
+								}
+						        
+								return null;
+							}
+				        }.execute();
 				        
-				        // Make the file read only
-				        File savedFile = new File(DOWNLOAD_PATH + fileName);
-				        savedFile.setReadOnly();
-				        
-				        out.writeUTF("upload:" + userId + ":" + fileName + ":" + file.length() + ":" + fileType[0]);
-				        is.close();
-				        os.close();	
 				        
 				        file = null;
-				        txtFilePath.setText("");
-				        
-					} catch (IOException e) {
-						JOptionPane.showMessageDialog(null, "Falied to add the file!");
-						e.printStackTrace();
 					} finally {
 						
 					}
@@ -213,21 +260,19 @@ public class Peer extends JFrame {
 									
 									SwingUtilities.invokeLater(new Runnable() {
 										public void run() {
-											model.setValueAt("Wating", tblFiles.getSelectedRow(), 6);											
+											model.setValueAt("Wating...", tblFiles.getSelectedRow(), 6);											
 										}
 									});
 									
 									long fileSize = 0;
 									
-									String query = "SELECT `files`.`size`"
-											+ " FROM `has_file`"
-											+ " INNER JOIN `files` ON `has_file`.`fid` = `files`.`id`"  
-											+ " WHERE (`fid` = ? AND `has_file`.`uid` <> ?)";
+									String query = "SELECT `size`"
+											+ " FROM `files`" 
+											+ " WHERE `id` = ?";
 									
 									try {
 										pst = conn.prepareStatement(query);
 										pst.setString(1, String.valueOf(receivedFileId));
-										pst.setString(2, String.valueOf(userId));
 										
 										res = pst.executeQuery();
 										
@@ -247,7 +292,8 @@ public class Peer extends JFrame {
 										// File request sender
 										try {
 											out.writeUTF("request" + ":" + socket.getLocalAddress().getHostAddress() + ":" + fileServerSocket.getLocalPort() + ":" + fileId + ":" + userId);
-											} catch (IOException e) {
+											System.out.println("request" + ":" + socket.getLocalAddress().getHostAddress() + ":" + fileServerSocket.getLocalPort() + ":" + fileId + ":" + userId);
+										} catch (IOException e) {
 											e.printStackTrace();
 										}
 										
@@ -273,6 +319,8 @@ public class Peer extends JFrame {
 									    										    	
 									    	if (progress < 99.9)
 									    		model.setValueAt( df2.format(progress) + "%", currentRow, 6);
+									    	else
+									    		model.setValueAt( "Preparing..." , currentRow, 6);
 									    }
 									    
 									    bos.close();
@@ -459,7 +507,7 @@ public class Peer extends JFrame {
 										
 									    BufferedInputStream bis = new BufferedInputStream(is);
 									    while ((count = bis.read(buffer)) > 0) {
-									    	os.write(buffer, 0, count);					
+									    	os.write(buffer, 0, count);				
 									    }							    
 									    
 									    is.close();
@@ -513,14 +561,14 @@ public class Peer extends JFrame {
 									
 			SwingUtilities.invokeLater(new Runnable() {
 				public void run() {
-					String sql = "SELECT `files`.`id` AS ID, ROW_NUMBER() OVER (ORDER BY added ASC) AS No,"
+					String sql = "SELECT `files`.`id` AS ID, ROW_NUMBER() OVER (ORDER BY `id` ASC) AS No,"
 							+ " `files`.`name` as Name, pretty_size(`files`.`size`) as Size, `files`.`type` as Type,"
 							+ " DATE_FORMAT(`files`.`added`, '%d/%c/%Y  %H:%i:%s') as Added, '0.0%' as Downloaded"
 							+ " FROM `files`"
 							+ " INNER JOIN `has_file` ON `files`.`id` = `has_file`.`fid`"
 							+ " INNER JOIN `users` ON `users`.`id` = `has_file`.`uid`"
 							+ " WHERE `users`.`active` = '1'"
-							+ " GROUP BY `files`.`id` ORDER BY `added` DESC";
+							+ " GROUP BY `files`.`id` ORDER BY `id` DESC";
 										
 					try {
 						pst = conn.prepareStatement(sql);
@@ -565,5 +613,12 @@ public class Peer extends JFrame {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+	}
+	
+	public static String readableFileSize(long size) {
+	    if(size <= 0) return "0";
+	    final String[] units = new String[] { "B", "kB", "MB", "GB", "TB" };
+	    int digitGroups = (int) (Math.log10(size)/Math.log10(1024));
+	    return new DecimalFormat("#,##0.#").format(size/Math.pow(1024, digitGroups)) + " " + units[digitGroups];
 	}
 }

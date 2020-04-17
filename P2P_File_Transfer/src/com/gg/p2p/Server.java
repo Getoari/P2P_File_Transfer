@@ -299,6 +299,8 @@ public class Server implements Runnable {
 			} catch (SQLException e) {
 				e.printStackTrace();
 			}
+    		
+	        handle("update");
 	        
 	        try {  
 	        	toTerminate.close();

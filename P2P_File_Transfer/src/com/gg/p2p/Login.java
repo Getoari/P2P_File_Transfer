@@ -111,10 +111,11 @@ public class Login {
 				try {
 					String query = "SELECT `id`, `salt` FROM `users`"
 							+ " WHERE `name` = ?";
-					
+									
 					pst = conn.prepareStatement(query);
 					pst.setString(1, txtUsername.getText());
 					res = pst.executeQuery();
+
 					
 					while(res.next()){
 						userId = res.getInt("id");
